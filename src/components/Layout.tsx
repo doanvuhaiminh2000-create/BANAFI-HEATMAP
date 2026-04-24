@@ -13,9 +13,9 @@ export default function Layout() {
   const [activeTab, setActiveTab] = useState<'overview' | 'config' | 'data'>('overview');
   const [selectedOption, setSelectedOption] = useState<AnalysisOption>('RUN_RATE');
   
-  // Timeframe state
-  const [endDate, setEndDate] = useState<Date>(new Date());
-  const [startDate, setStartDate] = useState<Date>(subDays(new Date(), 6));
+  // Timeframe state - default to full year 2026 to match report
+  const [endDate, setEndDate] = useState<Date>(new Date(2026, 11, 31));
+  const [startDate, setStartDate] = useState<Date>(new Date(2026, 0, 1));
   
   // Selected points organized by pillar
   const [selectedPillars, setSelectedPillars] = useState<Pillar[]>(MOCK_DATA);
@@ -56,6 +56,10 @@ export default function Layout() {
   const totalTarget = useMemo(() => allVisiblePoints.reduce((acc, p) => acc + p.monthlyTarget, 0), [allVisiblePoints]);
   const totalHeadcount = useMemo(() => allVisiblePoints.reduce((acc, p) => acc + p.headCount, 0), [allVisiblePoints]);
   
+  const totalActYTD = useMemo(() => allVisiblePoints.reduce((acc, p) => acc + (p.actYTD || 0), 0), [allVisiblePoints]);
+  const totalBudgetYTD = useMemo(() => allVisiblePoints.reduce((acc, p) => acc + (p.budgetYTD || 0), 0), [allVisiblePoints]);
+  const ytdProgress = totalBudgetYTD > 0 ? (totalActYTD / totalBudgetYTD * 100) : 0;
+
   const estimatedRunRate = totalTarget > 0 ? ((totalRev / Math.max(1, differenceInDays(endDate, startDate) + 1)) * 31 / totalTarget) * 100 : 0;
   const fteProductivity = totalHeadcount > 0 ? (totalRev / totalHeadcount) : 0;
   
@@ -64,10 +68,12 @@ export default function Layout() {
   )[0]?.name || "N/A", [allVisiblePoints]);
 
   const visiblePillars = useMemo(() => {
-    return timeFilteredPillars.map(pillar => ({
-      ...pillar,
-      points: pillar.points.filter(p => p.visible !== false)
-    })).filter(pillar => pillar.points.length > 0);
+    return timeFilteredPillars
+      .map(pillar => ({
+        ...pillar,
+        points: pillar.points.filter(p => p.visible === true || p.visible === undefined)
+      }))
+      .filter(pillar => pillar.points.length > 0);
   }, [timeFilteredPillars]);
 
   return (
@@ -96,10 +102,17 @@ export default function Layout() {
                 <div className="text-2xl font-bold text-slate-900">{(totalRev / 1000).toFixed(1)} Tỷ VND</div>
                 <div className="text-[10px] text-emerald-600 font-bold mt-1 uppercase italic">Dữ liệu gộp từ danh mục đang chọn</div>
               </div>
-              <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
-                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tiến độ dự phóng (Tập theo dõi)</div>
-                <div className="text-2xl font-bold text-slate-900">{estimatedRunRate.toFixed(1)}%</div>
-                <div className="text-[10px] text-slate-500 font-medium mt-1 italic">So với chỉ tiêu tháng cấu cấu hình</div>
+              <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-end">
+                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tiến độ YTD</div>
+                    <div className="text-2xl font-bold text-slate-900">{ytdProgress.toFixed(1)}%</div>
+                  </div>
+                  <div className="flex justify-between items-end mt-2">
+                    <div className="text-[10px] text-slate-500 font-medium italic">Run-rate Tháng</div>
+                    <div className="text-lg font-bold text-slate-700">{estimatedRunRate.toFixed(1)}%</div>
+                  </div>
+                </div>
               </div>
               <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100">
                 <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Cơ sở dẫn đầu (Tập theo dõi)</div>

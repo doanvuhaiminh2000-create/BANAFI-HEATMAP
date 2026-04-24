@@ -56,7 +56,7 @@ export function RevenueHeatmap({ pillars, option }: RevenueHeatmapProps) {
     };
 
     const hierarchy = d3.hierarchy<any>(rootData)
-      .sum(d => d.value)
+      .sum(d => d.children ? 0 : 1) // Equal area for every leaf node
       .sort((a, b) => (b.value || 0) - (a.value || 0));
 
     const treemapLayout = d3.treemap<any>()

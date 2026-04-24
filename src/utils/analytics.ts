@@ -1,6 +1,6 @@
 import { RevenuePoint } from '../data/mockData';
 
-export type AnalysisOption = 'GROWTH' | 'VOLATILITY' | 'RUN_RATE' | 'FTE_PRODUCTIVITY';
+export type AnalysisOption = 'GROWTH' | 'VOLATILITY' | 'RUN_RATE' | 'FTE_PRODUCTIVITY' | 'YTD_PROGRESS';
 
 export const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0);
 export const average = (arr: number[]) => arr.length ? sum(arr) / arr.length : 0;
@@ -34,6 +34,30 @@ export function analyzePoints(points: RevenuePoint[], option: AnalysisOption): P
     const revs = point.revenues;
     
     switch (option) {
+      case 'YTD_PROGRESS': {
+        const actYTD = point.actYTD || 0;
+        const budgetYTD = point.budgetYTD || 0;
+        let progressYTD = 0;
+        
+        if (budgetYTD > 0) {
+            progressYTD = (actYTD / budgetYTD) * 100;
+        }
+
+        let color = '';
+        if (budgetYTD === 0 && actYTD === 0) color = 'bg-slate-500';
+        else if (progressYTD >= 100) color = 'bg-green-600';
+        else if (progressYTD >= 90) color = 'bg-green-500';
+        else if (progressYTD >= 80) color = 'bg-amber-500';
+        else if (progressYTD >= 70) color = 'bg-orange-500';
+        else color = 'bg-red-600';
+
+        return {
+          point,
+          value: progressYTD,
+          label: `${progressYTD.toFixed(1)}%`,
+          colorClass: color
+        };
+      }
       case 'GROWTH': {
         let growthRates = [];
         for (let i = 1; i < revs.length; i++) {

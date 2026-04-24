@@ -16,6 +16,7 @@ interface TopBarProps {
 
 const ANALYTICS_LAYERS: { id: AnalysisOption; label: string }[] = [
   { id: 'RUN_RATE', label: 'Tiến độ (Run-rate)' },
+  { id: 'YTD_PROGRESS', label: 'Tiến độ YTD' },
   { id: 'GROWTH', label: 'Tăng trưởng (DoD)' },
   { id: 'VOLATILITY', label: 'Biến động' },
   { id: 'FTE_PRODUCTIVITY', label: 'Năng suất' },
