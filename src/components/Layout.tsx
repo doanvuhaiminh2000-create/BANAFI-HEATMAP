@@ -18,6 +18,12 @@ export default function Layout() {
   const [startDate, setStartDate] = useState<Date>(new Date(2026, 0, 1));
   const [lastRefreshDate, setLastRefreshDate] = useState<Date | undefined>(undefined);
   
+  const [uploadMeta, setUploadMeta] = useState<{
+    fileName: string;
+    dateRange: string;
+    pointCount: number;
+  } | null>(null);
+  
   // Selected points organized by pillar
   const [selectedPillars, setSelectedPillars] = useState<Pillar[]>(MOCK_DATA);
 
@@ -137,7 +143,15 @@ export default function Layout() {
           <DataImport 
             currentPillars={selectedPillars}
             onDataLoaded={handleDataLoaded} 
-            onClearData={() => setSelectedPillars(MOCK_DATA)}
+            onClearData={() => {
+              setSelectedPillars(MOCK_DATA);
+              setStartDate(new Date(2026, 0, 1));
+              setEndDate(new Date(2026, 11, 31));
+              setLastRefreshDate(undefined);
+              setUploadMeta(null);
+            }}
+            uploadMeta={uploadMeta}
+            setUploadMeta={setUploadMeta}
           />
         )}
       </main>

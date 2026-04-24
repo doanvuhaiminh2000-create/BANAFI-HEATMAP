@@ -10,16 +10,14 @@ interface DataImportProps {
   currentPillars: Pillar[];
   onDataLoaded: (pillars: Pillar[], newStart?: Date, newEnd?: Date) => void;
   onClearData: () => void;
+  uploadMeta: { fileName: string; dateRange: string; pointCount: number; } | null;
+  setUploadMeta: (meta: { fileName: string; dateRange: string; pointCount: number; } | null) => void;
 }
 
 // Hàm định vị chính xác: Dòng Excel -> Pillar & Group
-export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataImportProps) {
+export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMeta, setUploadMeta }: DataImportProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'idle', message: string }>({ type: 'idle', message: '' });
-  
-  const [loadedFileName, setLoadedFileName] = useState('');
-  const [dateRangeStr, setDateRangeStr] = useState('');
-  const [loadedPointsCount, setLoadedPointsCount] = useState(0);
 
   const processData = (wb: XLSX.WorkBook, fileName: string) => {
     try {
@@ -102,9 +100,19 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
             if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
           } else if (typeof cellVal === 'string') {
             // Trường hợp 3: chuỗi ngày tháng YYYY-MM-DD
-            const match = cellVal.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-            if (match) {
+            const matchYMD = cellVal.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (matchYMD) {
               dateStr = cellVal.trim();
+            } else if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(cellVal.trim())) {
+              // Handle MM/DD/YYYY or DD/MM/YYYY format as fallback
+              const parts = cellVal.trim().split('/');
+              if (parts.length >= 3) {
+                // assume DD/MM/YYYY format for Vietnam
+                const y = parseInt(parts[2], 10);
+                const m = parts[1].padStart(2, '0');
+                const d = parts[0].padStart(2, '0');
+                if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
+              }
             }
           }
           
@@ -115,8 +123,20 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
       }
 
       // Xác định cột "Năm" dùng cho Act YTD
-      let ytdIndex = actHeaderRow.findIndex(val => typeof val === 'string' && val.toUpperCase().includes('NĂM'));
-      if (ytdIndex === -1) ytdIndex = 39; // fallback
+      let ytdIndex = -1;
+      if (actHeaderRow) {
+        for (let i = 0; i < actHeaderRow.length; i++) {
+          const v = actHeaderRow[i];
+          if (v && typeof v === 'string') {
+            const upper = v.toUpperCase();
+            if (upper.includes('NĂM') || upper.includes('NAM') || upper.includes('YEAR')) {
+              ytdIndex = i;
+              break;
+            }
+          }
+        }
+      }
+      if (ytdIndex === -1) ytdIndex = 38; // fallback: col 39 in Excel = index 38
 
       const lastDate = dynamicDateCols.length > 0
         ? new Date(dynamicDateCols[dynamicDateCols.length - 1].dateStr)
@@ -194,9 +214,11 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
       updatedPillars.forEach(p => p.points.forEach(pt => {
          if (pt.revenues && pt.revenues.length > 0) loadedPtsCount++;
       }));
-      setLoadedPointsCount(loadedPtsCount);
-      setLoadedFileName(fileName);
-      setDateRangeStr(`${format(firstDate, 'dd/MM/yyyy')} - ${format(lastDate, 'dd/MM/yyyy')}`);
+      setUploadMeta({
+        fileName,
+        dateRange: `${format(firstDate, 'dd/MM/yyyy')} - ${format(lastDate, 'dd/MM/yyyy')}`,
+        pointCount: loadedPtsCount
+      });
 
       setStatus({ type: 'success', message: 'Nạp dữ liệu Act và Budget thành công theo đúng vị trí dòng báo cáo.' });
     } catch (err: any) {
@@ -229,27 +251,26 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
         <FileSpreadsheet className="mx-auto text-blue-600 mb-4" size={48} />
         <p className="font-bold">Kéo thả file báo cáo vào đây</p>
       </div>
-      {status.type !== 'idle' && (
-        <div className={cn("mt-6 p-4 rounded-xl text-sm font-medium flex items-center justify-between gap-4", status.type === 'success' ? "bg-emerald-50 border border-emerald-100" : "bg-red-50 border border-red-100")}>
+      {(uploadMeta || status.type !== 'idle') && (
+        <div className={cn("mt-6 p-4 rounded-xl text-sm font-medium flex items-center justify-between gap-4", (uploadMeta || status.type === 'success') ? "bg-emerald-50 border border-emerald-100" : "bg-red-50 border border-red-100")}>
           <div className="flex items-start gap-3">
-             {status.type === 'success' ? <CheckCircle className="text-emerald-600 mt-0.5" size={18} /> : <AlertCircle className="text-red-600 mt-0.5" size={18} />}
+             {(uploadMeta || status.type === 'success') ? <CheckCircle className="text-emerald-600 mt-0.5" size={18} /> : <AlertCircle className="text-red-600 mt-0.5" size={18} />}
              <div>
-                <p className={cn("font-bold mb-1", status.type === 'success' ? "text-emerald-800" : "text-red-800")}>{status.message}</p>
-                {status.type === 'success' && loadedFileName && (
+                <p className={cn("font-bold mb-1", (uploadMeta || status.type === 'success') ? "text-emerald-800" : "text-red-800")}>
+                  {status.type === 'success' ? status.message : uploadMeta ? 'Đang hiển thị dữ liệu đã nạp.' : status.message}
+                </p>
+                {uploadMeta && (
                   <ul className="text-emerald-700 text-xs space-y-1 list-disc list-inside opacity-80 mt-2">
-                     <li>File tải lên: <span className="font-semibold">{loadedFileName}</span></li>
-                     <li>Khoảng thời gian: <span className="font-semibold">{dateRangeStr}</span></li>
-                     <li>Dữ liệu nạp: <span className="font-semibold">{loadedPointsCount} cơ sở</span></li>
+                     <li>File tải lên: <span className="font-semibold">{uploadMeta.fileName}</span></li>
+                     <li>Khoảng thời gian: <span className="font-semibold">{uploadMeta.dateRange}</span></li>
+                     <li>Dữ liệu nạp: <span className="font-semibold">{uploadMeta.pointCount} cơ sở</span></li>
                   </ul>
                 )}
              </div>
           </div>
-          {status.type === 'success' && (
+          {uploadMeta && (
              <button onClick={() => {
                 setStatus({ type: 'idle', message: '' });
-                setLoadedFileName('');
-                setDateRangeStr('');
-                setLoadedPointsCount(0);
                 onClearData();
              }} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors text-xs font-bold uppercase tracking-wider">
                <Trash2 size={14} /> Xóa dữ liệu
