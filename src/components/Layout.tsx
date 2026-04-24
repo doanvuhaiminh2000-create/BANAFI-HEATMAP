@@ -16,6 +16,7 @@ export default function Layout() {
   // Timeframe state - default to full year 2026 to match report
   const [endDate, setEndDate] = useState<Date>(new Date(2026, 11, 31));
   const [startDate, setStartDate] = useState<Date>(new Date(2026, 0, 1));
+  const [lastRefreshDate, setLastRefreshDate] = useState<Date | undefined>(undefined);
   
   // Selected points organized by pillar
   const [selectedPillars, setSelectedPillars] = useState<Pillar[]>(MOCK_DATA);
@@ -25,6 +26,7 @@ export default function Layout() {
     if (newStart && newEnd) {
       setStartDate(newStart);
       setEndDate(newEnd);
+      setLastRefreshDate(newEnd);
     }
   };
 
@@ -81,6 +83,7 @@ export default function Layout() {
       <Sidebar 
         activeTab={activeTab}
         onSelectTab={setActiveTab}
+        lastRefreshDate={lastRefreshDate}
       />
       
       <main className="flex-1 flex flex-col p-8 overflow-hidden relative">

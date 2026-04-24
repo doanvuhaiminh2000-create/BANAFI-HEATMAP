@@ -7,9 +7,10 @@ type TabType = 'overview' | 'config' | 'data';
 interface SidebarProps {
   activeTab: TabType;
   onSelectTab: (tab: TabType) => void;
+  lastRefreshDate?: Date;
 }
 
-export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
+export function Sidebar({ activeTab, onSelectTab, lastRefreshDate }: SidebarProps) {
   return (
     <aside className="w-64 bg-slate-900 text-white flex flex-col flex-shrink-0">
       <div className="p-6 border-b border-slate-700">
@@ -53,7 +54,7 @@ export function Sidebar({ activeTab, onSelectTab }: SidebarProps) {
       </nav>
       
       <div className="p-6 text-[10px] text-slate-500 border-t border-slate-700 uppercase">
-        LAST DATA REFRESH: 2026-04-21 08:30 AM
+        LAST DATA REFRESH: {lastRefreshDate ? lastRefreshDate.toLocaleDateString('vi-VN') : '—'}
       </div>
     </aside>
   );

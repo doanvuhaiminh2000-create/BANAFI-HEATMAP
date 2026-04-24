@@ -69,9 +69,18 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
           
           let dateStr = '';
           if (cellVal instanceof Date && !isNaN(cellVal.getTime())) {
+            // Trường hợp 1: xlsx đã convert sang Date object (cellDates:true hoạt động đúng)
             const y = cellVal.getFullYear();
             const m = String(cellVal.getMonth() + 1).padStart(2, '0');
             const d = String(cellVal.getDate()).padStart(2, '0');
+            if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
+          } else if (typeof cellVal === 'number' && cellVal > 40000 && cellVal < 60000) {
+            // Trường hợp 2: xlsx trả về Excel serial number (40000–60000 tương ứng năm 2009–2064)
+            const excelEpoch = new Date(1899, 11, 30);
+            const jsDate = new Date(excelEpoch.getTime() + cellVal * 86400000);
+            const y = jsDate.getFullYear();
+            const m = String(jsDate.getMonth() + 1).padStart(2, '0');
+            const d = String(jsDate.getDate()).padStart(2, '0');
             if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
           }
           
