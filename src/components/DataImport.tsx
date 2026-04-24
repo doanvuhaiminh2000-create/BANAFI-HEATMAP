@@ -10,9 +10,47 @@ interface DataImportProps {
   currentPillars: Pillar[];
   onDataLoaded: (pillars: Pillar[], newStart?: Date, newEnd?: Date) => void;
   onClearData: () => void;
-  uploadMeta: { fileName: string; dateRange: string; pointCount: number; } | null;
-  setUploadMeta: (meta: { fileName: string; dateRange: string; pointCount: number; } | null) => void;
+  uploadMeta: { fileName: string; dateRange: string; pointCount: number; unmappedCount: number; } | null;
+  setUploadMeta: (meta: { fileName: string; dateRange: string; pointCount: number; unmappedCount: number; } | null) => void;
 }
+
+const SCAN_START_ROW = 37;
+const SCAN_END_ROW = 144;
+const EXCLUDED_ROWS = new Set([37, 38, 40, 41, 46, 52, 58, 75, 81, 83, 84, 85, 88, 94, 102, 107, 120, 124, 132, 140, 145]);
+
+const safeNum = (v: any): number => {
+  if (v == null) return 0;
+  const parsed = parseFloat(v);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const cellToDateStr = (cellVal: any): string => {
+  if (!cellVal) return '';
+  if (cellVal instanceof Date && !isNaN(cellVal.getTime())) {
+    const y = cellVal.getFullYear();
+    const m = String(cellVal.getMonth() + 1).padStart(2, '0');
+    const d = String(cellVal.getDate()).padStart(2, '0');
+    if (y >= 2000 && y < 2100) return `${y}-${m}-${d}`;
+  } else if (typeof cellVal === 'number' && cellVal > 20000 && cellVal < 80000) {
+    const excelEpoch = new Date(1899, 11, 30);
+    const jsDate = new Date(excelEpoch.getTime() + cellVal * 86400000);
+    const y = jsDate.getFullYear();
+    const m = String(jsDate.getMonth() + 1).padStart(2, '0');
+    const d = String(jsDate.getDate()).padStart(2, '0');
+    if (y >= 2000 && y < 2100) return `${y}-${m}-${d}`;
+  } else if (typeof cellVal === 'string') {
+    const matchYMD = cellVal.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (matchYMD) return cellVal.trim();
+    const parts = cellVal.trim().split('/');
+    if (parts.length >= 3) {
+      const y = parseInt(parts[2], 10);
+      const m = parts[1].padStart(2, '0');
+      const d = parts[0].padStart(2, '0');
+      if (y >= 2000 && y < 2100) return `${y}-${m}-${d}`;
+    }
+  }
+  return '';
+};
 
 // Hàm định vị chính xác: Dòng Excel -> Pillar & Group
 export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMeta, setUploadMeta }: DataImportProps) {
@@ -24,7 +62,7 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMe
       // Clone cấu trúc cố định hiện tại từ INITIAL_STATIC_DATA để đảm bảo replace hoàn toàn dữ liệu cũ
       const updatedPillars = JSON.parse(JSON.stringify(INITIAL_STATIC_DATA)) as Pillar[];
       
-      // Khởi tạo các giá trị trống cho mọi point (Bug 1 fix)
+      // Khởi tạo các giá trị trống cho mọi point
       updatedPillars.forEach(p => {
          p.points.forEach(pt => {
             pt.revenues = [];
@@ -45,29 +83,33 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMe
         throw new Error("Không tìm thấy sheet chứa dữ liệu thực tế (tên sheet cần chứa chữ 'ACT').");
       }
       const wsAct = wb.Sheets[targetActSheetName];
-      const actData = XLSX.utils.sheet_to_json(wsAct, { header: 1, raw: true, blankrows: true, defval: 0 }) as any[][];
+      const actData = XLSX.utils.sheet_to_json(wsAct, { header: 1, raw: true, blankrows: true, defval: null, range: 0 }) as any[][];
+
+      if (!actData[5] || actData[5][7] !== 'NỘI DUNG') {
+        throw new Error("File sai template: Không tìm thấy ô 'NỘI DUNG' tại cột 8 dòng 6. Vui lòng kiểm tra lại file báo cáo chuẩn.");
+      }
 
       // Đọc Budget Data
       const budgetSheetName = wb.SheetNames.find(n => n.toUpperCase().includes('BUDGET'));
-      const budgetMap = new Map<string, { [month: number]: number }>();
+      const budgetMap = new Map<string, { months: { [month: number]: number }, name: string }>();
 
       if (budgetSheetName) {
         const wsBudget = wb.Sheets[budgetSheetName];
-        const budgetData = XLSX.utils.sheet_to_json(wsBudget, { header: 1, raw: true, blankrows: true }) as any[][];
+        const budgetData = XLSX.utils.sheet_to_json(wsBudget, { header: 1, raw: true, blankrows: true, defval: null, range: 0 }) as any[][];
 
         budgetData.forEach((row, idx) => {
            const excelRow = idx + 1;
-           if (excelRow < 39 || excelRow > 144) return;
+           if (excelRow < SCAN_START_ROW || excelRow > SCAN_END_ROW) return;
            
            const locationName = row[7]?.toString().trim() || '';
-           if (!locationName || locationName.toLowerCase().includes('tổng')) return; // Bỏ qua theo logic trước
+           if (!locationName || locationName.toLowerCase().includes('tổng')) return; 
 
            const budgetMonths: { [month: number]: number } = {};
            for (let m = 1; m <= 12; m++) {
              const colIdx = 7 + m;
-             budgetMonths[m] = (parseFloat(row[colIdx]) || 0) / 1000000;
+             budgetMonths[m] = safeNum(row[colIdx]) / 1000000;
            }
-           budgetMap.set(`row_${excelRow}`, budgetMonths);
+           budgetMap.set(`row_${excelRow}`, { months: budgetMonths, name: locationName.toLowerCase().replace(/^\[.*?\]\s*/, '') });
         });
       }
 
@@ -83,49 +125,21 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMe
           const upperStr = String(cellVal).toUpperCase();
           if (upperStr.includes('THÁNG') || upperStr.includes('NĂM') || upperStr.includes('BUDGET') || upperStr.includes('KẾ HOẠCH')) continue;
           
-          let dateStr = '';
-          if (cellVal instanceof Date && !isNaN(cellVal.getTime())) {
-            // Trường hợp 1: xlsx đã convert sang Date object (cellDates:true hoạt động đúng)
-            const y = cellVal.getFullYear();
-            const m = String(cellVal.getMonth() + 1).padStart(2, '0');
-            const d = String(cellVal.getDate()).padStart(2, '0');
-            if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
-          } else if (typeof cellVal === 'number' && cellVal > 40000 && cellVal < 60000) {
-            // Trường hợp 2: xlsx trả về Excel serial number (40000–60000 tương ứng năm 2009–2064)
-            const excelEpoch = new Date(1899, 11, 30);
-            const jsDate = new Date(excelEpoch.getTime() + cellVal * 86400000);
-            const y = jsDate.getFullYear();
-            const m = String(jsDate.getMonth() + 1).padStart(2, '0');
-            const d = String(jsDate.getDate()).padStart(2, '0');
-            if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
-          } else if (typeof cellVal === 'string') {
-            // Trường hợp 3: chuỗi ngày tháng YYYY-MM-DD
-            const matchYMD = cellVal.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-            if (matchYMD) {
-              dateStr = cellVal.trim();
-            } else if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(cellVal.trim())) {
-              // Handle MM/DD/YYYY or DD/MM/YYYY format as fallback
-              const parts = cellVal.trim().split('/');
-              if (parts.length >= 3) {
-                // assume DD/MM/YYYY format for Vietnam
-                const y = parseInt(parts[2], 10);
-                const m = parts[1].padStart(2, '0');
-                const d = parts[0].padStart(2, '0');
-                if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
-              }
-            }
-          }
-          
+          const dateStr = cellToDateStr(cellVal);
           if (dateStr) {
             dynamicDateCols.push({ colIdx: c, dateStr });
           }
         }
       }
 
-      // Xác định cột "Năm" dùng cho Act YTD
+      if (dynamicDateCols.length === 0) {
+        throw new Error("Không tìm thấy cột ngày tháng nào trong khoảng từ cột thứ 9 trở đi ở dòng 6.");
+      }
+
+      // Xác định cột "Năm" dùng cho Act YTD (quét từ phải sang trái)
       let ytdIndex = -1;
       if (actHeaderRow) {
-        for (let i = 0; i < actHeaderRow.length; i++) {
+        for (let i = actHeaderRow.length - 1; i >= 0; i--) {
           const v = actHeaderRow[i];
           if (v && typeof v === 'string') {
             const upper = v.toUpperCase();
@@ -138,90 +152,112 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMe
       }
       if (ytdIndex === -1) ytdIndex = 38; // fallback: col 39 in Excel = index 38
 
-      const lastDate = dynamicDateCols.length > 0
-        ? new Date(dynamicDateCols[dynamicDateCols.length - 1].dateStr)
-        : new Date(2026, 3, 23);
+      const lastDate = new Date(dynamicDateCols[dynamicDateCols.length - 1].dateStr);
       const currentMonth = lastDate.getMonth() + 1; // 1-12
+
+      let loadedPtsCount = 0;
+      let unmappedCount = 0;
 
       actData.forEach((row, idx) => {
         const excelRow = idx + 1;
         
-        // Phạm vi: Chỉ quét từ dòng 37 đến 144
-        if (excelRow < 37 || excelRow > 144) return;
+        // Phạm vi quét
+        if (excelRow < SCAN_START_ROW || excelRow > SCAN_END_ROW) return;
         
         // Tuyệt đối không nạp các dòng tổng/tiêu đề phân mục
-        const excludedRows = [40, 41, 46, 52, 58, 75, 81, 83, 84, 85, 88, 94, 102, 107, 120, 124, 132, 140];
-        if (excludedRows.includes(excelRow)) return;
+        if (EXCLUDED_ROWS.has(excelRow)) return;
 
-        // Cơ chế mapping: Tìm theo ID dòng trước, nếu không có/bị lệch dòng thì fallback tìm theo tên
+        const rawName = row[7]?.toString().trim() || '';
+        if (!rawName || rawName.toLowerCase().includes('tổng')) return;
+
+        const cleanName = rawName.toLowerCase().replace(/^\[.*?\]\s*/, '');
         const targetId = `row_${excelRow}`;
-        const rawName = row[7]?.toString().trim().toLowerCase();
         
         // Tìm point trong struct
         let targetPoint: RevenuePoint | undefined;
+        let foundPt: RevenuePoint | undefined;
         updatedPillars.forEach(p => {
            const pt = p.points.find(x => {
-             const cleanName = x.name.replace(/^\[.*?\]\s*/, '').toLowerCase();
-             return x.id === targetId || (rawName && cleanName === rawName);
+             const ptClean = x.name.replace(/^\[.*?\]\s*/, '').toLowerCase();
+             return x.id === targetId || ptClean === cleanName;
            });
-           if (!targetPoint && pt) targetPoint = pt;
+           if (!foundPt && pt) foundPt = pt;
         });
+        targetPoint = foundPt;
 
-        if (!targetPoint) return;
+        if (!targetPoint) {
+            unmappedCount++;
+            return;
+        }
 
         const revenuesRaw: { [k: string]: number } = {};
         
-        // Thêm budget (ưu tiên id của điểm vừa tìm được, phòng trường hợp lệch)
-        const pointBudget = budgetMap.get(targetPoint.id) || budgetMap.get(targetId);
-        targetPoint.budgetByMonth = pointBudget || {};
+        // Match budget
+        let pointBudgetMonths = {};
+        const bgDataMatch = budgetMap.get(targetId);
+        if (bgDataMatch && bgDataMatch.name === cleanName) {
+            pointBudgetMonths = bgDataMatch.months;
+        }
+        
+        targetPoint.budgetByMonth = pointBudgetMonths || {};
         
         // Tính YTD budget
         const monthsYTD = currentMonth;
         targetPoint.budgetYTD = 0;
-        if (pointBudget) {
+        if (pointBudgetMonths) {
             for (let m = 1; m <= monthsYTD; m++) {
-                targetPoint.budgetYTD += (pointBudget[m] || 0);
+                targetPoint.budgetYTD += ((pointBudgetMonths as any)[m] || 0);
             }
         }
 
-        targetPoint.monthlyTarget = pointBudget ? (pointBudget[monthsYTD] || 0) : 0;
+        targetPoint.monthlyTarget = (pointBudgetMonths as any)[monthsYTD] || 0;
         
-        // Tính Act YTD từ cột động ytdIndex bằng parse an toàn
+        // Tính Act YTD
         let actYTDCell = row[ytdIndex];
-        targetPoint.actYTD = (parseFloat(actYTDCell as any) || 0) / 1000000;
+        targetPoint.actYTD = safeNum(actYTDCell) / 1000000;
 
         if (targetPoint.monthlyTarget === 0 && targetPoint.actYTD > 0 && currentMonth > 0) {
            targetPoint.monthlyTarget = targetPoint.actYTD / currentMonth;
         }
 
         for (const { colIdx, dateStr } of dynamicDateCols) {
-           const dayVal = parseFloat(row[colIdx]) || 0;
+           const dayVal = safeNum(row[colIdx]);
            revenuesRaw[dateStr] = dayVal / 1000000;
         }
 
         targetPoint.revenuesRaw = revenuesRaw;
         targetPoint.revenues = Object.values(revenuesRaw);
+        loadedPtsCount++;
       });
 
-      const firstDate = dynamicDateCols.length > 0 ? new Date(dynamicDateCols[0].dateStr) : new Date(2026, 3, 1);
+      if (loadedPtsCount === 0) {
+        throw new Error("Không thể map định danh cơ sở nào trong file với hệ thống. Vui lòng kiểm tra lại cấu trúc file!");
+      }
+
+      const firstDate = new Date(dynamicDateCols[0].dateStr);
       const rollingStart = dynamicDateCols.length >= 7
         ? new Date(dynamicDateCols[dynamicDateCols.length - 7].dateStr)
         : firstDate;
 
       onDataLoaded(updatedPillars, rollingStart, lastDate);
       
-      let loadedPtsCount = 0;
-      updatedPillars.forEach(p => p.points.forEach(pt => {
-         if (pt.revenues && pt.revenues.length > 0) loadedPtsCount++;
-      }));
+      const dateRangeStr = `${format(firstDate, 'dd/MM/yyyy')} - ${format(lastDate, 'dd/MM/yyyy')}`;
+      
       setUploadMeta({
         fileName,
-        dateRange: `${format(firstDate, 'dd/MM/yyyy')} - ${format(lastDate, 'dd/MM/yyyy')}`,
-        pointCount: loadedPtsCount
+        dateRange: dateRangeStr,
+        pointCount: loadedPtsCount,
+        unmappedCount
       });
 
-      setStatus({ type: 'success', message: 'Nạp dữ liệu Act và Budget thành công theo đúng vị trí dòng báo cáo.' });
+      let successMsg = `Nạp thành công ${loadedPtsCount} điểm doanh thu từ ${dynamicDateCols.length} ngày (${dateRangeStr}).`;
+      if (unmappedCount > 0) {
+          successMsg += ` (Có ${unmappedCount} dòng bị bỏ qua do không map được Tên).`;
+      }
+
+      setStatus({ type: 'success', message: successMsg });
     } catch (err: any) {
+      console.error(err);
       setStatus({ type: 'error', message: 'Lỗi: ' + err.message });
     } finally { setIsProcessing(false); }
   };
@@ -232,11 +268,22 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMe
     setIsProcessing(true);
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: 'binary', cellDates: true, cellFormula: false });
-      processData(wb, file.name);
+      try {
+         const data = evt.target?.result;
+         const wb = XLSX.read(data, { type: 'array', cellDates: true, cellFormula: false });
+         processData(wb, file.name);
+      } catch (err: any) {
+         console.error(err);
+         setStatus({ type: 'error', message: 'Lỗi đọc file: ' + err.message });
+         setIsProcessing(false);
+      }
     };
-    reader.readAsBinaryString(file);
+    reader.onerror = (err) => {
+      console.error(err);
+      setStatus({ type: 'error', message: 'Không thể đọc file đã chọn.' });
+      setIsProcessing(false);
+    };
+    reader.readAsArrayBuffer(file);
     e.target.value = '';
   };
 
@@ -252,18 +299,21 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMe
         <p className="font-bold">Kéo thả file báo cáo vào đây</p>
       </div>
       {(uploadMeta || status.type !== 'idle') && (
-        <div className={cn("mt-6 p-4 rounded-xl text-sm font-medium flex items-center justify-between gap-4", (uploadMeta || status.type === 'success') ? "bg-emerald-50 border border-emerald-100" : "bg-red-50 border border-red-100")}>
+        <div className={cn("mt-6 p-4 rounded-xl text-sm font-medium flex items-center justify-between gap-4", (status.type === 'success' || (status.type === 'idle' && uploadMeta)) ? "bg-emerald-50 border border-emerald-100" : "bg-red-50 border border-red-100")}>
           <div className="flex items-start gap-3">
-             {(uploadMeta || status.type === 'success') ? <CheckCircle className="text-emerald-600 mt-0.5" size={18} /> : <AlertCircle className="text-red-600 mt-0.5" size={18} />}
+             {(status.type === 'success' || (status.type === 'idle' && uploadMeta)) ? <CheckCircle className="text-emerald-600 mt-0.5" size={18} /> : <AlertCircle className="text-red-600 mt-0.5" size={18} />}
              <div>
-                <p className={cn("font-bold mb-1", (uploadMeta || status.type === 'success') ? "text-emerald-800" : "text-red-800")}>
-                  {status.type === 'success' ? status.message : uploadMeta ? 'Đang hiển thị dữ liệu đã nạp.' : status.message}
+                <p className={cn("font-bold mb-1", (status.type === 'success' || (status.type === 'idle' && uploadMeta)) ? "text-emerald-800" : "text-red-800")}>
+                  {status.message || (uploadMeta ? 'Đang hiển thị dữ liệu đã nạp.' : '')}
                 </p>
                 {uploadMeta && (
                   <ul className="text-emerald-700 text-xs space-y-1 list-disc list-inside opacity-80 mt-2">
                      <li>File tải lên: <span className="font-semibold">{uploadMeta.fileName}</span></li>
                      <li>Khoảng thời gian: <span className="font-semibold">{uploadMeta.dateRange}</span></li>
                      <li>Dữ liệu nạp: <span className="font-semibold">{uploadMeta.pointCount} cơ sở</span></li>
+                     {uploadMeta.unmappedCount > 0 && (
+                         <li>Cơ sở không định dạng được: <span className="font-semibold">{uploadMeta.unmappedCount}</span></li>
+                     )}
                   </ul>
                 )}
              </div>

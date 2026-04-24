@@ -22,6 +22,7 @@ export default function Layout() {
     fileName: string;
     dateRange: string;
     pointCount: number;
+    unmappedCount: number;
   } | null>(null);
   
   // Selected points organized by pillar

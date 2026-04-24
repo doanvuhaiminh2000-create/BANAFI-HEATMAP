@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { format, differenceInDays, startOfMonth, endOfMonth, subMonths, startOfQuarter, endOfQuarter } from 'date-fns';
+import { format, differenceInDays, startOfMonth, endOfMonth, subMonths, startOfQuarter, endOfQuarter, subDays } from 'date-fns';
 import { AnalysisOption } from '../utils/analytics';
 import { cn } from '../lib/utils';
 import { Calendar, ChevronDown, Clock } from 'lucide-react';
@@ -111,7 +111,7 @@ export function TopBar({
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Mốc thời gian nhanh</p>
                 
                 <button 
-                  onClick={() => applyPreset(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000), new Date())}
+                  onClick={() => applyPreset(subDays(endDate, 6), endDate)}
                   className="flex items-center justify-between p-2 hover:bg-blue-600 hover:text-white rounded-lg transition-colors text-xs font-bold text-slate-700 group text-left w-full"
                 >
                   <div className="flex items-center gap-2">
@@ -121,7 +121,7 @@ export function TopBar({
                 </button>
 
                 <button 
-                  onClick={() => applyPreset(startOfOfMonth(new Date()), endOfOfMonth(new Date()))}
+                  onClick={() => applyPreset(startOfMonth(endDate), endOfMonth(endDate))}
                   className="flex items-center justify-between p-2 hover:bg-blue-600 hover:text-white rounded-lg transition-colors text-xs font-bold text-slate-700 group text-left w-full"
                 >
                   <div className="flex items-center gap-2">
@@ -132,7 +132,7 @@ export function TopBar({
 
                 <button 
                   onClick={() => {
-                    const prev = subMonths(new Date(), 1);
+                    const prev = subMonths(endDate, 1);
                     applyPreset(startOfMonth(prev), endOfMonth(prev));
                   }}
                   className="flex items-center justify-between p-2 hover:bg-blue-600 hover:text-white rounded-lg transition-colors text-xs font-bold text-slate-700 group text-left w-full"
@@ -144,7 +144,7 @@ export function TopBar({
                 </button>
 
                 <button 
-                  onClick={() => applyPreset(startOfQuarter(new Date()), endOfQuarter(new Date()))}
+                  onClick={() => applyPreset(startOfQuarter(endDate), endOfQuarter(endDate))}
                   className="flex items-center justify-between p-2 hover:bg-blue-600 hover:text-white rounded-lg transition-colors text-xs font-bold text-slate-700 group text-left w-full"
                 >
                   <div className="flex items-center gap-2">
@@ -162,7 +162,7 @@ export function TopBar({
                     <input 
                       type="date" 
                       value={format(startDate, 'yyyy-MM-dd')}
-                      onChange={(e) => onStartDateChange(new Date(e.target.value))}
+                      onChange={(e) => onStartDateChange(new Date(e.target.value + 'T00:00:00'))}
                       className="text-[11px] font-bold p-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
                     />
                   </div>
@@ -171,7 +171,7 @@ export function TopBar({
                     <input 
                       type="date" 
                       value={format(endDate, 'yyyy-MM-dd')}
-                      onChange={(e) => onEndDateChange(new Date(e.target.value))}
+                      onChange={(e) => onEndDateChange(new Date(e.target.value + 'T00:00:00'))}
                       className="text-[11px] font-bold p-2 border border-slate-200 rounded-lg outline-none focus:border-blue-500"
                     />
                   </div>
@@ -185,6 +185,3 @@ export function TopBar({
   );
 }
 
-// Fixed function names for startOfMonth/endOfMonth mismatch
-function startOfOfMonth(date: Date) { return startOfMonth(date); }
-function endOfOfMonth(date: Date) { return endOfMonth(date); }
