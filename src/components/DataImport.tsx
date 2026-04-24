@@ -129,7 +129,7 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData, uploadMe
           const v = actHeaderRow[i];
           if (v && typeof v === 'string') {
             const upper = v.toUpperCase();
-            if (upper.includes('NĂM') || upper.includes('NAM') || upper.includes('YEAR')) {
+            if (upper.includes('NĂM') || upper.includes('YEAR')) {
               ytdIndex = i;
               break;
             }
