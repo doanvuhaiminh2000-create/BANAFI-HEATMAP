@@ -137,7 +137,7 @@ export default function Layout() {
           <DataImport 
             currentPillars={selectedPillars}
             onDataLoaded={handleDataLoaded} 
-            onClearData={() => setSelectedPillars([])}
+            onClearData={() => setSelectedPillars(MOCK_DATA)}
           />
         )}
       </main>

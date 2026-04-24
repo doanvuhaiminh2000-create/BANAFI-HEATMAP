@@ -108,11 +108,14 @@ export function analyzePoints(points: RevenuePoint[], option: AnalysisOption): P
         const ytd = sum(revs); 
         const passedDays = revs.length; 
         const totalDays = 31; 
-        const runRate = (ytd / passedDays) * totalDays;
+        const runRate = passedDays > 0 ? (ytd / passedDays) * totalDays : 0;
         
         let pctTarget = 0;
         if (point.monthlyTarget > 0) {
           pctTarget = (runRate / point.monthlyTarget) * 100;
+        } else if (ytd > 0) {
+          // No target: show neutral instead of red
+          return { point, value: 0, label: 'N/T', colorClass: 'bg-slate-500' };
         }
 
         let color = '';

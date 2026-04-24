@@ -42,17 +42,21 @@ export function RevenueHeatmap({ pillars, option }: RevenueHeatmapProps) {
 
     const rootData = {
       name: 'Root',
-      children: pillars.map(pillar => ({
-        name: pillar.name,
-        isPillar: true,
-        children: pillar.points.map(point => ({
-          name: point.name,
-          point,
-          pillarName: pillar.name, // Store for tooltip
-          analysis: analyzedMap.get(point.id)!,
-          value: Math.max(1, sum(point.revenues)) 
+      children: pillars
+        .filter(pillar => pillar.points.some(pt => pt.visible !== false))
+        .map(pillar => ({
+          name: pillar.name,
+          isPillar: true,
+          children: pillar.points
+            .filter(pt => pt.visible !== false)
+            .map(point => ({
+              name: point.name,
+              point,
+              pillarName: pillar.name, // Store for tooltip
+              analysis: analyzedMap.get(point.id)!,
+              value: Math.max(1, sum(point.revenues)) 
+            }))
         }))
-      }))
     };
 
     const hierarchy = d3.hierarchy<any>(rootData)

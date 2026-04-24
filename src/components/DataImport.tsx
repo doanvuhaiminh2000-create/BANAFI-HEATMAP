@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { FileSpreadsheet, Clock, CheckCircle, AlertCircle, Trash2, Database } from 'lucide-react';
-import { Pillar, RevenuePoint } from '../data/mockData';
+import { Pillar, RevenuePoint, INITIAL_STATIC_DATA } from '../data/mockData';
 import { cn } from '../lib/utils';
+import { format } from 'date-fns';
 
 interface DataImportProps {
   currentPillars: Pillar[];
@@ -15,14 +16,36 @@ interface DataImportProps {
 export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataImportProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'idle', message: string }>({ type: 'idle', message: '' });
+  
+  const [loadedFileName, setLoadedFileName] = useState('');
+  const [dateRangeStr, setDateRangeStr] = useState('');
+  const [loadedPointsCount, setLoadedPointsCount] = useState(0);
 
-  const processData = (wb: XLSX.WorkBook) => {
+  const processData = (wb: XLSX.WorkBook, fileName: string) => {
     try {
-      // Clone cấu trúc cố định hiện tại (đã được tạo full ID row_xxx)
-      const updatedPillars = JSON.parse(JSON.stringify(currentPillars)) as Pillar[];
+      // Clone cấu trúc cố định hiện tại từ INITIAL_STATIC_DATA để đảm bảo replace hoàn toàn dữ liệu cũ
+      const updatedPillars = JSON.parse(JSON.stringify(INITIAL_STATIC_DATA)) as Pillar[];
+      
+      // Khởi tạo các giá trị trống cho mọi point (Bug 1 fix)
+      updatedPillars.forEach(p => {
+         p.points.forEach(pt => {
+            pt.revenues = [];
+            pt.revenuesRaw = {};
+            pt.budgetByMonth = {};
+            pt.budgetYTD = 0;
+            pt.actYTD = 0;
+            pt.monthlyTarget = 0;
+         });
+      });
 
-      // Xác định Act Data 
-      const targetActSheetName = wb.SheetNames.find(n => n.toUpperCase().includes('ACT')) || wb.SheetNames[0];
+      // Xác định Act Data
+      if (wb.SheetNames.length === 1) {
+        throw new Error("Vui lòng gộp dữ liệu Act và Budget vào 1 file Excel (.xlsx) duy nhất có 2 sheet (tối thiểu chứa sheet Act và Budget).");
+      }
+      const targetActSheetName = wb.SheetNames.find(n => n.toUpperCase().includes('ACT'));
+      if (!targetActSheetName) {
+        throw new Error("Không tìm thấy sheet chứa dữ liệu thực tế (tên sheet cần chứa chữ 'ACT').");
+      }
       const wsAct = wb.Sheets[targetActSheetName];
       const actData = XLSX.utils.sheet_to_json(wsAct, { header: 1, raw: true, blankrows: true, defval: 0 }) as any[][];
 
@@ -44,12 +67,7 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
            const budgetMonths: { [month: number]: number } = {};
            for (let m = 1; m <= 12; m++) {
              const colIdx = 7 + m;
-             const rawVal = row[colIdx];
-             if (typeof rawVal === 'string' && rawVal.startsWith('=')) {
-                budgetMonths[m] = 0;
-             } else {
-                budgetMonths[m] = (parseFloat(row[colIdx]) / 1000000) || 0;
-             }
+             budgetMonths[m] = (parseFloat(row[colIdx]) || 0) / 1000000;
            }
            budgetMap.set(`row_${excelRow}`, budgetMonths);
         });
@@ -115,22 +133,26 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
         const excludedRows = [40, 41, 46, 52, 58, 75, 81, 83, 84, 85, 88, 94, 102, 107, 120, 124, 132, 140];
         if (excludedRows.includes(excelRow)) return;
 
-        // Chỉ tìm chính xác Data Point dựa trên số thứ tự dòng cứng (O(1) lookup)
+        // Cơ chế mapping: Tìm theo ID dòng trước, nếu không có/bị lệch dòng thì fallback tìm theo tên
         const targetId = `row_${excelRow}`;
+        const rawName = row[7]?.toString().trim().toLowerCase();
         
         // Tìm point trong struct
         let targetPoint: RevenuePoint | undefined;
         updatedPillars.forEach(p => {
-           const pt = p.points.find(x => x.id === targetId);
-           if (pt) targetPoint = pt;
+           const pt = p.points.find(x => {
+             const cleanName = x.name.replace(/^\[.*?\]\s*/, '').toLowerCase();
+             return x.id === targetId || (rawName && cleanName === rawName);
+           });
+           if (!targetPoint && pt) targetPoint = pt;
         });
 
         if (!targetPoint) return;
 
         const revenuesRaw: { [k: string]: number } = {};
         
-        // Thêm budget
-        const pointBudget = budgetMap.get(targetId);
+        // Thêm budget (ưu tiên id của điểm vừa tìm được, phòng trường hợp lệch)
+        const pointBudget = budgetMap.get(targetPoint.id) || budgetMap.get(targetId);
         targetPoint.budgetByMonth = pointBudget || {};
         
         // Tính YTD budget
@@ -144,9 +166,13 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
 
         targetPoint.monthlyTarget = pointBudget ? (pointBudget[monthsYTD] || 0) : 0;
         
-        // Tính Act YTD từ cột động ytdIndex
+        // Tính Act YTD từ cột động ytdIndex bằng parse an toàn
         let actYTDCell = row[ytdIndex];
-        targetPoint.actYTD = typeof actYTDCell === 'number' ? actYTDCell / 1000000 : 0;
+        targetPoint.actYTD = (parseFloat(actYTDCell as any) || 0) / 1000000;
+
+        if (targetPoint.monthlyTarget === 0 && targetPoint.actYTD > 0 && currentMonth > 0) {
+           targetPoint.monthlyTarget = targetPoint.actYTD / currentMonth;
+        }
 
         for (const { colIdx, dateStr } of dynamicDateCols) {
            const dayVal = parseFloat(row[colIdx]) || 0;
@@ -163,6 +189,15 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
         : firstDate;
 
       onDataLoaded(updatedPillars, rollingStart, lastDate);
+      
+      let loadedPtsCount = 0;
+      updatedPillars.forEach(p => p.points.forEach(pt => {
+         if (pt.revenues && pt.revenues.length > 0) loadedPtsCount++;
+      }));
+      setLoadedPointsCount(loadedPtsCount);
+      setLoadedFileName(fileName);
+      setDateRangeStr(`${format(firstDate, 'dd/MM/yyyy')} - ${format(lastDate, 'dd/MM/yyyy')}`);
+
       setStatus({ type: 'success', message: 'Nạp dữ liệu Act và Budget thành công theo đúng vị trí dòng báo cáo.' });
     } catch (err: any) {
       setStatus({ type: 'error', message: 'Lỗi: ' + err.message });
@@ -177,9 +212,10 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
     reader.onload = (evt) => {
       const bstr = evt.target?.result;
       const wb = XLSX.read(bstr, { type: 'binary', cellDates: true, cellFormula: false });
-      processData(wb);
+      processData(wb, file.name);
     };
     reader.readAsBinaryString(file);
+    e.target.value = '';
   };
 
   return (
@@ -194,9 +230,31 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
         <p className="font-bold">Kéo thả file báo cáo vào đây</p>
       </div>
       {status.type !== 'idle' && (
-        <div className={cn("mt-6 p-4 rounded-xl text-sm font-medium flex items-center gap-3", status.type === 'success' ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
-          {status.type === 'success' ? <CheckCircle size={18} /> : <AlertCircle size={18} />}
-          {status.message}
+        <div className={cn("mt-6 p-4 rounded-xl text-sm font-medium flex items-center justify-between gap-4", status.type === 'success' ? "bg-emerald-50 border border-emerald-100" : "bg-red-50 border border-red-100")}>
+          <div className="flex items-start gap-3">
+             {status.type === 'success' ? <CheckCircle className="text-emerald-600 mt-0.5" size={18} /> : <AlertCircle className="text-red-600 mt-0.5" size={18} />}
+             <div>
+                <p className={cn("font-bold mb-1", status.type === 'success' ? "text-emerald-800" : "text-red-800")}>{status.message}</p>
+                {status.type === 'success' && loadedFileName && (
+                  <ul className="text-emerald-700 text-xs space-y-1 list-disc list-inside opacity-80 mt-2">
+                     <li>File tải lên: <span className="font-semibold">{loadedFileName}</span></li>
+                     <li>Khoảng thời gian: <span className="font-semibold">{dateRangeStr}</span></li>
+                     <li>Dữ liệu nạp: <span className="font-semibold">{loadedPointsCount} cơ sở</span></li>
+                  </ul>
+                )}
+             </div>
+          </div>
+          {status.type === 'success' && (
+             <button onClick={() => {
+                setStatus({ type: 'idle', message: '' });
+                setLoadedFileName('');
+                setDateRangeStr('');
+                setLoadedPointsCount(0);
+                onClearData();
+             }} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg transition-colors text-xs font-bold uppercase tracking-wider">
+               <Trash2 size={14} /> Xóa dữ liệu
+             </button>
+          )}
         </div>
       )}
     </div>
