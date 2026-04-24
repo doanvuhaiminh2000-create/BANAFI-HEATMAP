@@ -82,6 +82,12 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
             const m = String(jsDate.getMonth() + 1).padStart(2, '0');
             const d = String(jsDate.getDate()).padStart(2, '0');
             if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
+          } else if (typeof cellVal === 'string') {
+            // Trường hợp 3: chuỗi ngày tháng YYYY-MM-DD
+            const match = cellVal.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+            if (match) {
+              dateStr = cellVal.trim();
+            }
           }
           
           if (dateStr) {
@@ -89,6 +95,10 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
           }
         }
       }
+
+      // Xác định cột "Năm" dùng cho Act YTD
+      let ytdIndex = actHeaderRow.findIndex(val => typeof val === 'string' && val.toUpperCase().includes('NĂM'));
+      if (ytdIndex === -1) ytdIndex = 39; // fallback
 
       const lastDate = dynamicDateCols.length > 0
         ? new Date(dynamicDateCols[dynamicDateCols.length - 1].dateStr)
@@ -134,8 +144,8 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
 
         targetPoint.monthlyTarget = pointBudget ? (pointBudget[monthsYTD] || 0) : 0;
         
-        // Tính Act YTD từ cột 38 (0-indexed -> 38, dòng 6 là header nên Act 2026 ở cột index 38)
-        let actYTDCell = row[38];
+        // Tính Act YTD từ cột động ytdIndex
+        let actYTDCell = row[ytdIndex];
         targetPoint.actYTD = typeof actYTDCell === 'number' ? actYTDCell / 1000000 : 0;
 
         for (const { colIdx, dateStr } of dynamicDateCols) {
