@@ -7,7 +7,7 @@ import { cn } from '../lib/utils';
 
 interface DataImportProps {
   currentPillars: Pillar[];
-  onDataLoaded: (pillars: Pillar[]) => void;
+  onDataLoaded: (pillars: Pillar[], newStart?: Date, newEnd?: Date) => void;
   onClearData: () => void;
 }
 
@@ -29,8 +29,6 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
       // Đọc Budget Data
       const budgetSheetName = wb.SheetNames.find(n => n.toUpperCase().includes('BUDGET'));
       const budgetMap = new Map<string, { [month: number]: number }>();
-      
-      let budgetYtdCount = 4; // Mặc định là đến tháng 4, có thể sẽ động dựa vào ngày cập nhật. Do file có số lượng cột ngày thay đổi.
 
       if (budgetSheetName) {
         const wsBudget = wb.Sheets[budgetSheetName];
@@ -57,6 +55,37 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
         });
       }
 
+      // Xử lý động cột ngày từ header (dòng thứ 6 trong excel, index = 5)
+      const actHeaderRow = actData[5];
+      const dynamicDateCols: { colIdx: number; dateStr: string }[] = [];
+
+      if (actHeaderRow) {
+        for (let c = 8; c < actHeaderRow.length; c++) {
+          const cellVal = actHeaderRow[c];
+          if (!cellVal) continue;
+          
+          const upperStr = String(cellVal).toUpperCase();
+          if (upperStr.includes('THÁNG') || upperStr.includes('NĂM') || upperStr.includes('BUDGET') || upperStr.includes('KẾ HOẠCH')) continue;
+          
+          let dateStr = '';
+          if (cellVal instanceof Date && !isNaN(cellVal.getTime())) {
+            const y = cellVal.getFullYear();
+            const m = String(cellVal.getMonth() + 1).padStart(2, '0');
+            const d = String(cellVal.getDate()).padStart(2, '0');
+            if (y >= 2000 && y < 2100) dateStr = `${y}-${m}-${d}`;
+          }
+          
+          if (dateStr) {
+            dynamicDateCols.push({ colIdx: c, dateStr });
+          }
+        }
+      }
+
+      const lastDate = dynamicDateCols.length > 0
+        ? new Date(dynamicDateCols[dynamicDateCols.length - 1].dateStr)
+        : new Date(2026, 3, 23);
+      const currentMonth = lastDate.getMonth() + 1; // 1-12
+
       actData.forEach((row, idx) => {
         const excelRow = idx + 1;
         
@@ -79,7 +108,6 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
 
         if (!targetPoint) return;
 
-        // Trích xuất doanh thu thực tế từng ngày (Giả định nằm từ cột 8 đến 30) (Chỉ để mẫu filter, tuỳ vào requirement file)
         const revenuesRaw: { [k: string]: number } = {};
         
         // Thêm budget
@@ -87,7 +115,7 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
         targetPoint.budgetByMonth = pointBudget || {};
         
         // Tính YTD budget
-        const monthsYTD = 4; // Assuming current month is April based on the file spec
+        const monthsYTD = currentMonth;
         targetPoint.budgetYTD = 0;
         if (pointBudget) {
             for (let m = 1; m <= monthsYTD; m++) {
@@ -101,21 +129,21 @@ export function DataImport({ currentPillars, onDataLoaded, onClearData }: DataIm
         let actYTDCell = row[38];
         targetPoint.actYTD = typeof actYTDCell === 'number' ? actYTDCell / 1000000 : 0;
 
-        // For run-rate filtering by day, read from column 8 to ~30 (April dates)
-        // Since we only receive april dates in file, we distribute the actYTD across the months if needed, or directly use the daily columns
-        // For simplicity now, let's keep the daily revenues from col 8 -> 30 mapped to april
-        for (let c = 8; c <= 30; c++) {
-           const dayVal = parseFloat(row[c]) || 0;
-           const dString = (c - 7).toString().padStart(2, '0');
-           revenuesRaw[`2026-04-${dString}`] = dayVal / 1000000;
+        for (const { colIdx, dateStr } of dynamicDateCols) {
+           const dayVal = parseFloat(row[colIdx]) || 0;
+           revenuesRaw[dateStr] = dayVal / 1000000;
         }
 
         targetPoint.revenuesRaw = revenuesRaw;
         targetPoint.revenues = Object.values(revenuesRaw);
       });
 
-      // Tự động set thời gian mốc là 2026-04-01 -> 2026-04-23 khi nạp xong
-      onDataLoaded(updatedPillars, new Date(2026, 3, 1), new Date(2026, 3, 23));
+      const firstDate = dynamicDateCols.length > 0 ? new Date(dynamicDateCols[0].dateStr) : new Date(2026, 3, 1);
+      const rollingStart = dynamicDateCols.length >= 7
+        ? new Date(dynamicDateCols[dynamicDateCols.length - 7].dateStr)
+        : firstDate;
+
+      onDataLoaded(updatedPillars, rollingStart, lastDate);
       setStatus({ type: 'success', message: 'Nạp dữ liệu Act và Budget thành công theo đúng vị trí dòng báo cáo.' });
     } catch (err: any) {
       setStatus({ type: 'error', message: 'Lỗi: ' + err.message });
